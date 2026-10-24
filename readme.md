@@ -1,4 +1,8 @@
-# 🦞 Lobster
+# 🦞 Lobster-Fix
+
+- Initialize CUDA after validated GPU selection and consolidate interpreter initialization.
+- Configure build paths and CUDA architecture, generate the parser, and adapt the Rust API calls.
+- Restore four missing Scallop modules from pinned upstream source.
 
 *Lobster is forked from Scallop, see below for the original Scallop readme*
 *The current version of lobster has limitations that are being addressed for a future release. See below for more details*

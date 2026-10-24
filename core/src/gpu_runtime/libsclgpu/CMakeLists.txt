@@ -22,6 +22,9 @@ set(OBJECTS_NAME sclgpu_objs)
 set(LIBRARY_NAME sclgpu)
 set(TESTS_NAME sclgpu_tests)
 
+# A30 can be compiled on a host without an injected GPU.
+set(CMAKE_CUDA_ARCHITECTURES "80" CACHE STRING "CUDA architectures")
+set(CCCL_ROOT "${CMAKE_CURRENT_LIST_DIR}/cccl" CACHE PATH "Pinned Lobster CCCL checkout")
 project(SclGpu LANGUAGES CXX CUDA)
 
 #message(CMAKE_CXX_COMPILER_ID="${CMAKE_CXX_COMPILER_ID}")
@@ -215,16 +218,16 @@ if (DEFINED USE_CCCL)
   )
   add_library(CCCL::CCCL INTERFACE IMPORTED GLOBAL)
 
-  #find_package(CUB REQUIRED CONFIG NO_DEFAULT_PATH HINTS "${CMAKE_CURRENT_LIST_DIR}/cccl/cub/" )
-  find_package(CUB REQUIRED CONFIG NO_DEFAULT_PATH HINTS "${CMAKE_CURRENT_LIST_DIR}/cccl/lib/cmake/cub/" )
+  #find_package(CUB REQUIRED CONFIG NO_DEFAULT_PATH HINTS "${CCCL_ROOT}/cub/" )
+  find_package(CUB REQUIRED CONFIG NO_DEFAULT_PATH HINTS "${CCCL_ROOT}/lib/cmake/cub/" )
   add_library(CCCL::CUB ALIAS _CUB_CUB)
   target_link_libraries(CCCL::CCCL INTERFACE CCCL::CUB)
 
-  find_package(libcudacxx CONFIG NO_DEFAULT_PATH HINTS "${CMAKE_CURRENT_LIST_DIR}/cccl/lib/cmake/libcudacxx/")
+  find_package(libcudacxx CONFIG NO_DEFAULT_PATH HINTS "${CCCL_ROOT}/lib/cmake/libcudacxx/")
   add_library(CCCL::libcudacxx ALIAS _libcudacxx_libcudacxx)
   target_link_libraries(CCCL::CCCL INTERFACE CCCL::libcudacxx)
 
-  find_package(Thrust CONFIG NO_DEFAULT_PATH HINTS "${CMAKE_CURRENT_LIST_DIR}/cccl/lib/cmake/thrust/")
+  find_package(Thrust CONFIG NO_DEFAULT_PATH HINTS "${CCCL_ROOT}/lib/cmake/thrust/")
   thrust_create_target(CCCL::Thrust FROM_OPTIONS
     HOST_OPTION cpp
     DEVICE_OPTION cuda
@@ -257,7 +260,7 @@ set_target_properties(
       POSITION_INDEPENDENT_CODE ON
       CUDA_SEPARABLE_COMPILATION ON
       CUDA_RESOLVE_DEVICE_SYMBOLS ON
-      CUDA_ARCHITECTURES native
+      CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
 
       CXX_STANDARD 17
       CXX_STANDARD_REQUIRED YES

@@ -73,12 +73,6 @@ impl<Prov: provenance::Provenance, Ptr: PointerFamily> InterpretContext<Prov, Pt
   }
 
   pub fn run(&mut self) -> Result<(), IntegrateError> {
-    // Initialize the cuda context
-    unsafe {
-      if std::env::var("STRATUM").is_ok() {
-        crate::gpu_runtime::ffi::libsclgpu_init();
-      }
-    }
     // Execute the program
     self
       .execution_context

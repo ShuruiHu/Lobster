@@ -236,10 +236,12 @@ impl<Prov: Provenance, Ptr: PointerFamily> DynamicExecutionContext<Prov, Ptr> {
     //let (graphs, edges) = crate::gpu_runtime::construct_ram_graph(&program_ref.strata);
     //crate::gpu_runtime::print_ram_graph(&graphs, &edges);
 
-    unsafe {
-      crate::gpu_runtime::ffi::libsclgpu_init();
-    }
     let mut gpu_ctx = crate::gpu_runtime::GpuExecutionContext::new_from_env(&program_ref.strata);
+    if gpu_ctx.is_some() {
+      unsafe {
+        crate::gpu_runtime::ffi::libsclgpu_init();
+      }
+    }
     let mut cuda_idb = None;
 
     let unoptimized_stratum_set = gpu_ctx.as_ref().map(|x| x.stratum_set.clone());

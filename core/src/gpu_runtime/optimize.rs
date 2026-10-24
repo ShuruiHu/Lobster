@@ -105,7 +105,7 @@ pub fn delay_unused_relation(stratum: &mut ram::Stratum) -> (Vec<ram::Update>, B
     .collect::<HashSet<_>>();
   let delayed_relations = stratum
     .relations
-    .extract_if(|name, _| delayed_updates_names.contains(name))
+    .extract_if(.., |name, _| delayed_updates_names.contains(name))
     .collect();
   (delayed_updates, delayed_relations)
 }
