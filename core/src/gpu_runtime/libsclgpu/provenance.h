@@ -661,7 +661,7 @@ class DiffTopKProofsProvenance {
       result.empty = true;
     } else {
       result.empty = false;
-      new (&result.literals) Array<float>((size_t)t.lit_count_);
+      new (&result.literals) Array<int32_t>((size_t)t.lit_count_);
       for (uint32_t i = 0; i < t.lit_count_; i++) {
         result.literals[i] = t.literals_[i];
       }

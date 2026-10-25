@@ -443,12 +443,11 @@ Array<StaticDB<Prov>> *execute_stratum_set(
         // convert tags
       hINFO("convert tags, sample size: " << sample_size)
         Array<typename Prov::FFITag> foreign_tags(sample_size);
-        //if (!Prov::is_unit) {
-        //  for (size_t j = start; j < start + sample_size; j++) {
-        //    hINFO("convert tag " << j - start << " of " << sample_size);
-        //    foreign_tags[j - start] = Prov::to_foreign(host_tags[j]);
-        //  }
-        //}
+        if (!Prov::is_unit) {
+          for (size_t j = start; j < start + sample_size; j++) {
+            foreign_tags[j - start] = Prov::to_foreign(host_tags[j]);
+          }
+        }
 
         // convert facts
       hINFO("convert facts")

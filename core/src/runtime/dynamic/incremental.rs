@@ -327,7 +327,7 @@ impl<Prov: Provenance, Ptr: PointerFamily> DynamicExecutionContext<Prov, Ptr> {
 
     // compare scallop-gpu result to scallop-cpu
     if let Some((optimized_program, cuda_idb)) = cuda_idb {
-      gpu_ctx.unwrap().check_gpu_output(cuda_idb, &optimized_program, self);
+      gpu_ctx.unwrap().check_gpu_output(cuda_idb, &optimized_program, self, ctx);
     }
 
     // See if any EDB relations need to directly go into IDB

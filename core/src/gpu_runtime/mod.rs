@@ -409,6 +409,7 @@ impl GpuExecutionContext {
     cuda_idb: IntentionalDatabase<Prov, Ptr>,
     program: &ram::Program,
     execution_context: &DynamicExecutionContext<Prov, Ptr>,
+    ctx: &Prov,
   ) {
     let (_input_relations, output_relations) = self.boundary_relations(&program.strata);
     let mut incorrect_output = false;
@@ -438,6 +439,23 @@ impl GpuExecutionContext {
         println!("Expected: {}", expected_output);
         println!("Actual: {}", actual_output);
         incorrect_output = true;
+      } else {
+        // Collection equality compares tuple keys; probabilities need a separate check.
+        for (expected, actual) in expected_output.elements().iter().zip(actual_output.elements().iter()) {
+          let expected_weight = ctx.weight(&expected.tag);
+          let actual_weight = ctx.weight(&actual.tag);
+          let tolerance = 1e-7 + 1e-5 * expected_weight.abs();
+          if !expected_weight.is_finite()
+            || !actual_weight.is_finite()
+            || (expected_weight - actual_weight).abs() > tolerance
+          {
+            println!(
+              "Output relation {} tuple {} weight does not match: expected {}, actual {}",
+              output_relation, expected.tuple, expected_weight, actual_weight
+            );
+            incorrect_output = true;
+          }
+        }
       }
 
       let check_tags: bool = std::env::var("CHECK_TAGS").is_ok();
