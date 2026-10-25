@@ -41,7 +41,7 @@ __global__ void gather_merge_tags(typename Prov::Tag *left_tags,
 template <typename Prov>
 __global__ void specialized_merge_combine_tags(
     char *sample_mask, typename Prov::Tag *source_tags, int32_t *tag_indices,
-    typename Prov::Tag *output_tags, int output_size,
+    typename Prov::Tag *output_tags, int output_size, int input_size,
     typename Prov::BatchDeviceContext ctxs) {
   size_t index = (blockIdx.x * blockDim.x) + threadIdx.x;
   if (index >= output_size) {
@@ -49,17 +49,11 @@ __global__ void specialized_merge_combine_tags(
   }
   auto ctx = Prov::sample_context(ctxs, sample_mask[index]);
 
-  // special case last element
-  if (index == output_size - 1) {
-    output_tags[index] = source_tags[tag_indices[index]];
-    return;
-  }
-
   // After a merge, a fact can be duplicated at most once; therefore,
   // we know whether or not this fact is duplicated (and whether we need to
   // merge tags) based on whether or not the next index is contiguous
   auto this_tag_index = tag_indices[index];
-  auto next_tag_index = tag_indices[index + 1];
+  auto next_tag_index = index + 1 < output_size ? tag_indices[index + 1] : input_size;
   if (this_tag_index + 1 == next_tag_index) {
     output_tags[index] = source_tags[this_tag_index];
   } else {
@@ -239,7 +233,7 @@ Table<Prov> merge_tables_specialized(const Table<Prov> &left,
     specialized_merge_combine_tags<Prov>
         <<<ROUND_UP_TO_NEAREST(output_length, 128), 128>>>(
             output_sample_mask.data(), merged_tags.data(),
-            output_facts_indices.data(), output_tags.data(), output_length,
+            output_facts_indices.data(), output_tags.data(), output_length, merged_facts_size,
             ctx.device_context());
     cudaCheck(cudaDeviceSynchronize());
     TRACE_END(specalized_merge_combine_tags);

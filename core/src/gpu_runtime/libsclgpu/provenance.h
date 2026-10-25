@@ -611,26 +611,26 @@ class DiffTopKProofsProvenance {
   using InputTag = Proof<N>;
   using OutputTag = Proof<N>;
   using FFITag = C_Proof;
-  using BatchDeviceContext = device_vec<float> *;
-  using DeviceContext = device_vec<float> *;
+  using BatchDeviceContext = device_vec<double> *;
+  using DeviceContext = device_vec<double> *;
 
  private:
-  ManagedArray<device_vec<float>> literal_probabilities_;
+  ManagedArray<device_vec<double>> literal_probabilities_;
 
  public:
-  const ManagedArray<device_vec<float>> &literal_probabilities() const {
+  const ManagedArray<device_vec<double>> &literal_probabilities() const {
     return literal_probabilities_;
   }
-  __device__ static float clause_probability(DeviceContext ctx, Tag t);
+  __device__ static double clause_probability(DeviceContext ctx, Tag t);
 
   DiffTopKProofsProvenance(Provenance::DiffTopKProofs *storage) {
     auto batch_size = storage->literal_probabilities.size();
-    ManagedArray<device_vec<float>> batch_probs(batch_size);
+    ManagedArray<device_vec<double>> batch_probs(batch_size);
     for (size_t sample = 0; sample < batch_size; sample++) {
       auto &sample_probs = storage->literal_probabilities[sample];
-      new (&batch_probs[sample]) device_vec<float>(sample_probs.size());
+      new (&batch_probs[sample]) device_vec<double>(sample_probs.size());
       cudaCheck(cudaMemcpy(batch_probs[sample].data(), sample_probs.data(),
-                           sizeof(float) * sample_probs.size(),
+                           sizeof(double) * sample_probs.size(),
                            cudaMemcpyHostToDevice));
     }
     literal_probabilities_ = std::move(batch_probs);

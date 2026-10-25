@@ -34,6 +34,23 @@ tag 丢失的独立复现：两条边的概率为 `0.8, 0.7`，闭包输出应�
 
 `NO_CHECK=1` 仍用于 GPU-only 执行。正常自检仍执行 CPU 参考，新增检查比较数值权重。proof 身份和梯度通过独立回归检查。
 
+## 递归 proof 与算子修复
+
+逐项对照 CPU `dynamic/relation.rs`、`schedulers/lfp.rs`、`schedulers/utils.rs` 和 GPU 实现，使用独立小程序及实际 proof 树确认以下问题。
+
+| 位置 | 确认的问题 | 修改 |
+|---|---|---|
+| `libsclgpu/dataflow.cu` | 只看 stable 元组数量，遗漏最后 recent 中的更优 proof；更差候选也继续传播。 | 按 CPU 调度合同筛选有效前沿：严格改善进入 recent，同权保留 stable，移除被替换的旧 stable；有效 recent 非空时继续。筛选与搬运在 GPU 执行。 |
+| `libsclgpu/merge_specialized.cu` | 最后一个 key 直接复制首个 tag，漏合并重复项。 | 以输入长度作为最后一组的右边界，统一执行 tag 合并。 |
+| `gpu_runtime/tag.rs`、`libsclgpu/bindings.h`、`provenance.*`、`project_constant.cu` | f32 评分把真实不等权 proof 舍入为同权，后续共享事实去重放大偏差。 | 概率表、FFI、设备和 host 评分统一使用 CPU 的 f64 精度。 |
+| `provenance.cu`、`project_constant.cu` | 逻辑零在乘法中成为真元，在加法中覆盖概率为零的有效 proof。 | 恢复乘法零吸收和加法零身份，保留普通同权比较 `>`。 |
+
+实际反例：晚到三跳路径应为 `0.9×0.8×0.7=0.504`，原 GPU 返回 shortcut `0.12`；末尾 key 更新应为 `0.9×0.8=0.72`，原 GPU 保留 `0.1`；更差候选传播使原 GPU 返回 `0.3`，CPU 为 `0.2`。这些例子分别隔离收敛、merge 和前沿筛选。
+
+Pacman 首场景 `path_(0,20)` 的实际旧 stable 路径为 `0→5→10→15→20`，权重 `0.11874668435883295`。GPU 第 8 轮 recent 已含权重 `0.1789995377939982` 的较优路径，原循环此时停止并只返回 stable。逐轮记录明确定位到丢失前沿。
+
+`>=` 反例的调用顺序也已核对：CPU 从 `to_add_batches.pop()` 先处理最后一条规则，再由稳定 top-1 保留该 proof；GPU 顺序 append 后以原 `>` 保留后者。两端在该小例中原本一致。稳定前沿更新则使用 CPU 的 `add(stable, candidate)` 合同，同权保留旧 proof。两个调用点分别处理。
+
 ## 公共构建调整
 
 - `core/build.rs` 使用源码相对路径，支持 `SCLGPU_LIB_DIR`、`CUDA_HOME`，并生成缺失的 parser。
@@ -52,4 +69,4 @@ CCCL 固定为 `5a87e5d5706efa2d59e8d8281c89f093cd48280f`，Catch2 固定为 `6e
 - Pacman-Maze：固定 32 个 5×5 场景，预训练 CNN 识别格子，再由符号规则选择下一步避敌、接近目标的动作。比较全部概率、分数及动作。
 - CUDA 跟踪：CPU import、context 创建、run；GPU 实际 offload；同进程 CUDA context 同步并检查返回值。
 
-GPU 使用 f32 权重、并行规约和现有收敛条件。Boolean TC 与概率推理分别验证；Pacman 正式实验使用 CPU 符号路径，GPU 完整概率差异保存在诊断记录中。论文实验的精确提交和逐项概率日志需另行核对。
+Boolean TC 与概率推理分别验证。回归比较完整概率、梯度和 proof 传播，记录 GPU-only 输出及原始跟踪。CPU 实现作为兼容参考。论文实验的精确提交和逐项概率日志需另行核对。

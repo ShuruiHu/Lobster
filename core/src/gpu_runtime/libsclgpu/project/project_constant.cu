@@ -29,12 +29,12 @@ struct TagReduceFunctor {
   }
 };
 
-static float clause_probability_host(std::vector<float> lit_probs,
+static double clause_probability_host(std::vector<double> lit_probs,
                               typename DiffTopKProofsProvenance<>::Tag t) {
   if (t.empty_) {
     return 0.0;
   }
-  float result = 1.0;
+  double result = 1.0;
   for (int i = 0; i < t.lit_count_; i++) {
     auto lit = t.literals_[i];
     auto prob = lit_probs.at(abs(lit) - 1);
@@ -44,8 +44,10 @@ static float clause_probability_host(std::vector<float> lit_probs,
 }
 
 static typename DiffTopKProofsProvenance<>::Tag dtkp_add_host(
-    std::vector<float> lit_probs, typename DiffTopKProofsProvenance<>::Tag t1,
+    std::vector<double> lit_probs, typename DiffTopKProofsProvenance<>::Tag t1,
     typename DiffTopKProofsProvenance<>::Tag t2) {
+  if (t1.empty_) return t2;
+  if (t2.empty_) return t1;
   if (clause_probability_host(lit_probs, t1) >
       clause_probability_host(lit_probs, t2)) {
     return t1;
@@ -130,7 +132,7 @@ Table<Prov> project_constant(Table<Prov> source, const Expr &expr,
     // output_tags = device_vec(std::vector<typename Prov::Tag>{reduced_tag});
     if constexpr (std::is_same<Prov, DiffTopKProofsProvenance<>>::value) {
       std::vector<typename Prov::Tag> tags_host = source.tags().to_host();
-      std::vector<float> lit_probs = ctx.literal_probabilities()[0].to_host();
+      std::vector<double> lit_probs = ctx.literal_probabilities()[0].to_host();
       auto result_tag = std::reduce(tags_host.begin(), tags_host.end(),
                                 Prov::zero(), [&](auto accum, auto tag) {
                                   return dtkp_add_host(lit_probs, accum, tag);

@@ -1161,7 +1161,7 @@ struct Provenance {
     double valid_threshold;
   };
   struct DiffTopKProofs {
-    Array<Array<float>> literal_probabilities;
+    Array<Array<double>> literal_probabilities;
   };
 
   Tag tag;

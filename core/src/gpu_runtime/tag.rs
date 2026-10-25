@@ -203,7 +203,7 @@ impl std::fmt::Display for C_Proof {
 #[repr(C)]
 pub struct C_DiffTopKProofs {
   // nested because of batching
-  pub literal_probabilities: C_Array<C_Array<f32>>,
+  pub literal_probabilities: C_Array<C_Array<f64>>,
 }
 impl<T: FromTensor, Ptr: PointerFamily> From<&Vec<DiffTopKProofsProvenance<T, Ptr>>> for C_DiffTopKProofs {
   fn from(ctxes: &Vec<DiffTopKProofsProvenance<T, Ptr>>) -> Self {
@@ -212,7 +212,7 @@ impl<T: FromTensor, Ptr: PointerFamily> From<&Vec<DiffTopKProofsProvenance<T, Pt
       .iter()
       .map(|prov| {
         C_Array::new(Ptr::get_rc_cell(&prov.storage.storage, |d: &Vec<(f64, Option<T>)>| {
-          d.iter().map(|(p, _)| p.clone() as f32).collect::<Vec<_>>()
+          d.iter().map(|(p, _)| *p).collect::<Vec<_>>()
         }))
       })
       .collect::<Vec<_>>();
@@ -229,7 +229,7 @@ impl<Ptr: PointerFamily> From<&Vec<TopKProofsProvenance<Ptr>>> for C_DiffTopKPro
       .iter()
       .map(|prov| {
         C_Array::new(Ptr::get_cell(&prov.probs, |d: &Vec<f64>| {
-          d.iter().map(|p| p.clone() as f32).collect::<Vec<_>>()
+          d.clone()
         }))
       })
       .collect::<Vec<_>>();

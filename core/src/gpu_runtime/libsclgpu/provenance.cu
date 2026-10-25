@@ -6,14 +6,14 @@
 #include "provenance.h"
 #include "utils.h"
 template <>
-__device__ float DiffTopKProofsProvenance<>::clause_probability(
+__device__ double DiffTopKProofsProvenance<>::clause_probability(
     typename DiffTopKProofsProvenance<>::DeviceContext ctx,
     typename DiffTopKProofsProvenance<>::Tag t) {
   PROOFVAL(t)
   if (t.empty_) {
     return 0.0;
   }
-  float result = 1.0;
+  double result = 1.0;
   // auto probs = ctx->data();
   for (int i = 0; i < t.lit_count_; i++) {
     auto lit = t.literals_[i];
@@ -56,6 +56,8 @@ DiffTopKProofsProvenance<>::add(
     typename DiffTopKProofsProvenance<>::Tag t2) {
   PROOFVAL(t1);
   PROOFVAL(t2);
+  if (t1.empty_) return t2;
+  if (t2.empty_) return t1;
   if (clause_probability(ctx, t1) > clause_probability(ctx, t2)) {
     return t1;
   } else {
@@ -70,6 +72,9 @@ DiffTopKProofsProvenance<>::mult(
     typename DiffTopKProofsProvenance<>::Tag t1,
     typename DiffTopKProofsProvenance<>::Tag t2) {
   Tag result;
+  if (t1.empty_ || t2.empty_) {
+    return Tag::zero();
+  }
   auto left_ptr = 0;
   auto right_ptr = 0;
 

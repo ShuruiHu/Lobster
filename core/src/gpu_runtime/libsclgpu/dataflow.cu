@@ -1,9 +1,13 @@
+#include <thrust/copy.h>
 #include <thrust/device_vector.h>
+#include <thrust/gather.h>
 #include <thrust/iterator/constant_iterator.h>
+#include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/set_operations.h>
 
 #include <cstddef>
+#include <type_traits>
 #include <unordered_map>
 
 #include "dataflow.h"
@@ -22,6 +26,139 @@
 #include "provenance.h"
 #include "table_index.h"
 #include "utils.h"
+
+namespace {
+using ProofProvenance = DiffTopKProofsProvenance<>;
+
+// Normalization sorts U32/F32 columns by their uint32_t representation,
+// with the sample index before the tuple columns.
+__device__ int compare_proof_rows(
+    const TableView<ProofProvenance> &left, const char *left_samples,
+    size_t left_row, const TableView<ProofProvenance> &right,
+    const char *right_samples, size_t right_row, size_t width) {
+  if (left_samples[left_row] != right_samples[right_row]) {
+    return left_samples[left_row] < right_samples[right_row] ? -1 : 1;
+  }
+  for (size_t col = 0; col < width; col++) {
+    auto l = left.at<uint32_t>(left_row, col);
+    auto r = right.at<uint32_t>(right_row, col);
+    if (l != r) return l < r ? -1 : 1;
+  }
+  return 0;
+}
+
+__global__ void select_proof_frontier(
+    TableView<ProofProvenance> stable, const char *stable_samples,
+    const ProofProvenance::Tag *stable_tags, size_t stable_size,
+    TableView<ProofProvenance> candidates, const char *candidate_samples,
+    const ProofProvenance::Tag *candidate_tags, size_t width,
+    ProofProvenance::BatchDeviceContext contexts, char *stable_keep,
+    char *candidate_keep) {
+  size_t row = blockIdx.x * blockDim.x + threadIdx.x;
+  if (row >= candidates.size()) return;
+  candidate_keep[row] = 0;
+  const auto candidate = candidate_tags[row];
+  if (candidate.empty_) return;
+
+  size_t lo = 0, hi = stable_size;
+  while (lo < hi) {
+    auto mid = lo + (hi - lo) / 2;
+    if (compare_proof_rows(stable, stable_samples, mid, candidates,
+                           candidate_samples, row, width) < 0) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  bool found = lo < stable_size &&
+      compare_proof_rows(stable, stable_samples, lo, candidates,
+                         candidate_samples, row, width) == 0;
+  if (found && !stable_tags[lo].empty_) {
+    auto context =
+        ProofProvenance::sample_context(contexts, candidate_samples[row]);
+    // CPU scheduling adds (stable, candidate), retaining stable on a tie.
+    if (!(ProofProvenance::clause_probability(context, candidate) >
+          ProofProvenance::clause_probability(context, stable_tags[lo]))) {
+      return;
+    }
+  }
+  candidate_keep[row] = 1;
+  // Normalized candidates have unique keys, so each stable mask has one writer.
+  if (found) stable_keep[lo] = 0;
+}
+
+struct KeepProofRow {
+  const char *keep;
+  __device__ bool operator()(uint32_t row) const { return keep[row] != 0; }
+};
+
+Table<ProofProvenance> compact_proof_rows(
+    const Table<ProofProvenance> &source, const device_vec<char> &keep,
+    const Allocator &alloc) {
+  if (source.size() == 0) return source;
+  device_vec<uint32_t> indices(source.size(), alloc);
+  auto rows = thrust::make_counting_iterator<uint32_t>(0);
+  auto end = thrust::copy_if(thrust::device, rows, rows + source.size(),
+                             indices.data(), KeepProofRow{keep.data()});
+  size_t size = end - indices.data();
+  if (size == source.size()) return source;
+  if (size == 0) return Table<ProofProvenance>(source.schema());
+
+  Array<device_buffer> facts(source.width());
+  for (size_t col = 0; col < source.width(); col++) {
+    new (&facts[col]) device_buffer(size,
+        source.schema().flatten().at(col).singleton(), alloc);
+    thrust::gather(thrust::device, indices.data(), end,
+        reinterpret_cast<const uint32_t *>(source.at_raw(0, col)),
+        facts[col].begin<uint32_t>());
+  }
+  device_vec<ProofProvenance::Tag> tags(size, alloc);
+  thrust::gather(thrust::device, indices.data(), end,
+                 source.tags().data(), tags.data());
+  device_vec<char> samples(size, alloc);
+  thrust::gather(thrust::device, indices.data(), end,
+                 source.sample_mask().data(), samples.data());
+  return Table<ProofProvenance>(source.schema(), std::move(tags),
+                                std::move(facts), std::move(samples));
+}
+
+bool advance_proof_frontier(DynamicRelation<ProofProvenance> &relation,
+                            const ProofProvenance &ctx, const Allocator &alloc) {
+  auto candidates = normalized(relation.delta(), ctx, alloc);
+  if (candidates.size() == 0) {
+    relation.recent() = candidates;
+    return false;
+  }
+  auto width = candidates.width();
+  if (width == 0 || width > 6) {
+    PANIC("Unsupported proof frontier width: %lu", width);
+  }
+  for (size_t col = 0; col < width; col++) {
+    auto type = candidates.schema().flatten().at(col).singleton();
+    if (type != ValueType::U32() && type != ValueType::F32()) {
+      PANIC("Unsupported proof frontier column type");
+    }
+  }
+  auto &stable = relation.stable();
+  device_vec<char> stable_keep(stable.size(), alloc);
+  device_vec<char> candidate_keep(candidates.size(), alloc);
+  if (stable.size() != 0) {
+    cudaCheck(cudaMemset(stable_keep.data(), 1, stable.size()));
+  }
+  // An empty Table has no storage. The dummy view is never read when size is zero.
+  auto stable_view = stable.size() != 0 ? stable.view() : candidates.view();
+  auto stable_samples = stable.size() != 0 ? stable.sample_mask().data() : nullptr;
+  auto stable_tags = stable.size() != 0 ? stable.tags().data() : nullptr;
+  select_proof_frontier<<<ROUND_UP_TO_NEAREST(candidates.size(), 128), 128>>>(
+      stable_view, stable_samples, stable_tags, stable.size(),
+      candidates.view(), candidates.sample_mask().data(), candidates.tags().data(),
+      width, ctx.device_context(), stable_keep.data(), candidate_keep.data());
+  cudaCheck(cudaDeviceSynchronize());
+  relation.stable() = compact_proof_rows(stable, stable_keep, alloc);
+  relation.recent() = compact_proof_rows(candidates, candidate_keep, alloc);
+  return relation.recent().size() != 0;
+}
+}  // namespace
 
 template <typename Prov>
 std::ostream &operator<<(std::ostream &os,
@@ -56,6 +193,14 @@ std::vector<std::string> DynamicIdb<Prov>::incorporate_delta(const Prov &ctx, Al
     relation.stable() =
         merge_tables(relation.stable(), relation.recent(), ctx, alloc);
     this->validate();
+    if constexpr (std::is_same_v<Prov, ProofProvenance>) {
+      if (advance_proof_frontier(relation, ctx, alloc)) {
+        changed_relations.push_back(pair.first);
+      }
+      relation.delta().clear();
+      this->validate();
+      continue;
+    }
     if (stable_size != relation.stable().size()) {
       changed_relations.push_back(pair.first);
     }
