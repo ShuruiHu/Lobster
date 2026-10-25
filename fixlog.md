@@ -17,13 +17,18 @@
 |---|---|
 | `core/src/gpu_runtime/libsclgpu/lib.cu` | 非 unit 输出的 tag 转换循环被注释。恢复实际 `host_tags` 回传。 |
 | `core/src/gpu_runtime/libsclgpu/provenance.h` | `C_Proof.literals` 声明为 `Array<int32_t>`，原 placement-new 构造 `Array<float>`。统一为 `Array<int32_t>`。 |
+| `core/src/gpu_runtime/tag.rs`、两种 top-k provenance 及 CUDA 两处概率查表 | 原编码 `±id` 将 `Neg(0)` 和 `Pos(0)` 都写成 `0`。统一编码为 `±(id+1)`，查表使用 `abs(literal)-1`，恢复时保留符号。 |
 | `core/src/gpu_runtime/mod.rs` | 原自检使用只比较 tuple 的集合相等，`CHECK_TAGS` 仅打印。增加同一 tuple 的 provenance weight 比较，容差为 `1e-7 + 1e-5 × abs(CPU weight)`，拒绝非有限值。 |
 
 tag 丢失的独立复现：两条边的概率为 `0.8, 0.7`，闭包输出应为 `0.8, 0.7, 0.56`，输出总和对输入的梯度应为 `1.7, 1.8`。原 GPU 返回全 `1` 和全 `0` 梯度。这个例子只使用符号程序。
 
-等权 proof 会影响后续结果。例如 `{a,b}` 和 `{b,c}` 当前均为 `α²`，再与 `a` 合并时分别成为 `α²` 和 `α³`。恢复 tag 后，Pacman 的 32 个场景中有 23 个场景存在部分分数差异，动作和 BFS 评价一致。
+独立检查还发现：Pacman 的中间结果 `(0,5)`，CPU proof 含 `Neg(0)`，GPU 回传成 `Pos(0)`，权重从 `0.8589723666` 变成 `0.04352761075`。普通 provenance 的事实表只追加，检查使用同一个 provenance 上下文。该差异来自 signed literal 编码。
 
-曾测试把 GPU `add` 从 `>` 改为 `>=`。这让 32 场景输出一致，但另一个三事实程序出现相反偏差：`p=a∧b; p=b∧c; q=p∧a`，事实概率均为 `0.5`，CPU `q=0.125`，候选 GPU `q=0.25`。局部左优先并不能统一 CPU/GPU 整体求值顺序，因此最终源码保留原来的 `>`。这项差异属于现有 top-1 proof 剪枝与求值顺序的限制，单独记录。
+可微和普通 top-k 共用此协议；设备和常量投影的 host 概率查表同步调整。设备仍使用原 `int16_t` literal，输入事实 ID 范围为 `0..32766`。Rust 和 CUDA 在窄化前校验范围，拒绝零编码和溢出。
+
+等权 proof 会影响后续结果。例如 `{a,b}` 和 `{b,c}` 当前均为 `α²`，再与 `a` 合并时分别成为 `α²` 和 `α³`。tag 回传修复阶段记录过 Pacman 23/32 场景的部分分数差异，动作和 BFS 评价一致。
+
+曾测试把 GPU `add` 从 `>` 改为 `>=`。这让当时的 32 场景输出一致，但另一个三事实程序出现相反偏差：`p=a∧b; p=b∧c; q=p∧a`，事实概率均为 `0.5`，CPU `q=0.125`，候选 GPU `q=0.25`。该反例说明局部左优先不能统一整体 proof 顺序。最终源码保留原来的 `>`。
 
 上述 CUDA 文件在原始提交与 `5b17581` 中相同。CPU provenance、规则、CNN 和权重沿用现有实现。FFI 类型修正解决对象类型错误，tag 丢失有单独的复现证据。
 
@@ -43,6 +48,7 @@ CCCL 固定为 `5a87e5d5706efa2d59e8d8281c89f093cd48280f`，Catch2 固定为 `6e
 
 - Boolean unit TC：空图、DAG、环、自环、重复边、不连通图和 u32 边界值，完整输出对照独立 BFS。
 - 概率 DAG：CPU/GPU 完整概率和输入梯度；新 context 重复执行；正常自检与 `NO_CHECK=1` 分别运行。
+- signed literal：事实 0 的补集、概率及梯度，常量投影；正负 ID 与设备边界往返检查。
 - Pacman-Maze：固定 32 个 5×5 场景，预训练 CNN 识别格子，再由符号规则选择下一步避敌、接近目标的动作。比较全部概率、分数及动作。
 - CUDA 跟踪：CPU import、context 创建、run；GPU 实际 offload；同进程 CUDA context 同步并检查返回值。
 

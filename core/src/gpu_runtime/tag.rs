@@ -132,6 +132,60 @@ pub struct C_Proof {
   pub literals: C_Array<i32>,
   pub empty: bool,
 }
+impl C_Proof {
+  // Zero is reserved. Device proofs store signed 16-bit literals.
+  pub fn encode_literal(literal: &Literal) -> i32 {
+    let (id, negative) = match literal {
+      Literal::Pos(id) => (*id, false),
+      Literal::Neg(id) => (*id, true),
+    };
+    assert!(id < i16::MAX as usize, "GPU proof fact id exceeds 32766");
+    let encoded = id as i32 + 1;
+    if negative { -encoded } else { encoded }
+  }
+
+  pub fn decode_literal(encoded: &i32) -> Literal {
+    assert!(*encoded != 0 && *encoded >= -(i16::MAX as i32) && *encoded <= i16::MAX as i32,
+            "Invalid GPU proof literal");
+    let id = (encoded.abs() - 1) as usize;
+    if *encoded < 0 { Literal::Neg(id) } else { Literal::Pos(id) }
+  }
+}
+
+#[cfg(test)]
+mod proof_literal_tests {
+  use super::*;
+
+  #[test]
+  fn preserves_fact_zero_sign_and_device_boundary() {
+    assert_eq!(C_Proof::encode_literal(&Literal::Pos(0)), 1);
+    assert_eq!(C_Proof::encode_literal(&Literal::Neg(0)), -1);
+    for id in [0, 1, 32766] {
+      for literal in [Literal::Pos(id), Literal::Neg(id)] {
+        assert_eq!(C_Proof::decode_literal(&C_Proof::encode_literal(&literal)), literal);
+      }
+    }
+  }
+
+  #[test]
+  #[should_panic(expected = "exceeds 32766")]
+  fn rejects_device_id_overflow() {
+    C_Proof::encode_literal(&Literal::Pos(32767));
+  }
+
+  #[test]
+  #[should_panic(expected = "Invalid GPU proof literal")]
+  fn rejects_zero_literal() {
+    C_Proof::decode_literal(&0);
+  }
+
+  #[test]
+  #[should_panic(expected = "Invalid GPU proof literal")]
+  fn rejects_invalid_signed_literal() {
+    C_Proof::decode_literal(&i32::MIN);
+  }
+}
+
 impl std::fmt::Display for C_Proof {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     write!(f, "Proof: [")?;

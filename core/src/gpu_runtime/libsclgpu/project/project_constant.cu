@@ -37,7 +37,7 @@ static float clause_probability_host(std::vector<float> lit_probs,
   float result = 1.0;
   for (int i = 0; i < t.lit_count_; i++) {
     auto lit = t.literals_[i];
-    auto prob = lit_probs.at(abs(lit));
+    auto prob = lit_probs.at(abs(lit) - 1);
     result *= (lit >= 0) ? prob : (1.0 - prob);
   }
   return result;

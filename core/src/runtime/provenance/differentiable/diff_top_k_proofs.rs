@@ -1,4 +1,3 @@
-use std::convert::TryFrom;
 use crate::common::foreign_tensor::*;
 use crate::gpu_runtime::array::C_Array;
 use crate::gpu_runtime::tag::{C_DiffTopKProofs, C_Proof, C_Provenance};
@@ -65,10 +64,7 @@ impl<T: FromTensor, P: PointerFamily> Provenance for DiffTopKProofsProvenance<T,
 
   type FFITag = C_Proof;
   fn to_ffi_tag(tag: &Self::Tag) -> Self::FFITag {
-    let lit_to_int = |l: &Literal| match l {
-      Literal::Pos(id) => i32::try_from(*id).unwrap(),
-      Literal::Neg(id) => -i32::try_from(*id).unwrap()
-    };
+    let lit_to_int = C_Proof::encode_literal;
     match tag.clauses.get(0) {
       Some(proof) => C_Proof {
         literals: C_Array::new(proof.literals.iter().map(lit_to_int).collect()),
@@ -81,13 +77,7 @@ impl<T: FromTensor, P: PointerFamily> Provenance for DiffTopKProofsProvenance<T,
     }
   }
   fn from_ffi_tag(tag: &Self::FFITag) -> Self::Tag {
-    let int_to_lit = |n: &i32| {
-      if *n < 0 {
-        Literal::Neg((*n * -1) as usize)
-      } else {
-        Literal::Pos(*n as usize)
-      }
-    };
+    let int_to_lit = C_Proof::decode_literal;
     match tag.empty {
       false => DNFFormula::new(vec![Clause::new(tag.literals.as_slice().iter().map(int_to_lit).collect())]),
       true => DNFFormula::new(vec![]),

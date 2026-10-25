@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <string>
 
 #include "bindings.h"
@@ -16,7 +17,7 @@ __device__ float DiffTopKProofsProvenance<>::clause_probability(
   // auto probs = ctx->data();
   for (int i = 0; i < t.lit_count_; i++) {
     auto lit = t.literals_[i];
-    auto prob = ctx->at_device(abs(lit));
+    auto prob = ctx->at_device(abs(lit) - 1);
     result *= (lit >= 0) ? prob : (1.0 - prob);
   }
   return result;
@@ -37,7 +38,11 @@ DiffTopKProofsProvenance<>::from_foreign(
       PANIC("too many literals: %lu", t.literals.size());
     }
     for (size_t i = 0; i < t.literals.size(); i++) {
-      result.literals_[i] = t.literals[i];
+      const auto literal = t.literals[i];
+      if (literal == 0 || literal < -INT16_MAX || literal > INT16_MAX) {
+        PANIC("invalid signed proof literal: %d", literal);
+      }
+      result.literals_[i] = literal;
     }
     result.lit_count_ = t.literals.size();
   }
