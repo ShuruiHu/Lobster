@@ -51,6 +51,21 @@ Pacman 首场景 `path_(0,20)` 的实际旧 stable 路径为 `0→5→10→15→
 
 `>=` 反例的调用顺序也已核对：CPU 从 `to_add_batches.pop()` 先处理最后一条规则，再由稳定 top-1 保留该 proof；GPU 顺序 append 后以原 `>` 保留后者。两端在该小例中原本一致。稳定前沿更新则使用 CPU 的 `add(stable, candidate)` 合同，同权保留旧 proof。两个调用点分别处理。
 
+## 验证结果与同权边界
+
+上述递归、merge、精度和零元修复的代码提交为 `e8a4807643b9767b3e07623712cff1aa45b2f845`，对应 `5cu125` release wheel。后续日志提交追加诊断记录。
+
+- 晚到和被支配 proof 的 8 次回归通过；五类算子错误的 24 次回归通过。新 CPU 完整概率和梯度保持修改前结果。
+- Boolean TC 的 42 次小图检查及完整 email-Eu-core CPU/GPU 检查通过。完整数据输出为 793,283 对，与独立参考同 SHA-256。
+- CPU import/context/run 跟踪为 0 次 CUDA API、0 个 kernel；无 GPU 设备和驱动库的容器完成 TC。GPU 跟踪确认实际 kernel，同进程同步成功。
+- Pacman 32 场景的 CPU 输出保持原样。GPU 边界路径权重修复后与 CPU 一致；最终仍有 23 场景的部分分数不同，动作全部一致。
+
+剩余分歧已追到同一 join 批次的同权候选：`path_(8,14)` 的 CPU 路径为 `8→9→14`，GPU 为 `8→13→14`，两条路径都为 `α³`。CPU 单批次 stable sort 后保留首 proof，GPU 当前规约保留后 proof。CPU 跨批次还按 LIFO 和批次最小 key 决定 merge 顺序，递归 stable 保留多个批次；GPU 将这些批次合为单表。
+
+首场景 Left 动作的 actor 在节点 13，下一格为 8。CPU `path_(8,24)` 走 `8→9→14→19→24`，GPU 走 `8→13→18→23→24`，均为同权有效路径。与 next_position 的 `{8,13}` 合并后，CPU 使用 6 个 grid 事实，GPU 使用 5 个，分数分别为 `0.1830933094` 和 `0.1927298009`，相差一个 `α=0.95` 因子。
+
+本次保留 CPU 同权行为和 GPU 原 `>`。严格复制所有 CPU 同权结果需要保留其批次及调度信息，或明确统一两端的同权政策。两个独立同权反例和完整模型差异作为兼容性记录保存。
+
 ## 公共构建调整
 
 - `core/build.rs` 使用源码相对路径，支持 `SCLGPU_LIB_DIR`、`CUDA_HOME`，并生成缺失的 parser。
